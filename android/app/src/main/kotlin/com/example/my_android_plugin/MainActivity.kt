@@ -10,7 +10,11 @@ import com.apk.axml.aXMLEncoder
 import org.xmlpull.v1.XmlPullParserException
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.IOException
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 
 class MainActivity : FlutterActivity() {
 
@@ -22,65 +26,112 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
-                    "decodeBinaryAXML" -> {
-                        val path = call.argument<String>("path")
-                        if (path == null) {
-                            result.error("INVALID_ARGUMENT", "Missing 'path' argument", null)
-                            return@setMethodCallHandler
-                        }
-
-                        try {
-                            val file = File(path)
-                            val decodedXml = if (isBinaryXML(file)) {
-                                FileInputStream(file).use { fis ->
-                                    aXMLDecoder().decode(fis)
-                                }
-                            } else {
-                                file.readText(Charsets.UTF_8)
-                            }
-                            result.success(decodedXml)
-                        } catch (e: Exception) {
-                            result.error("DECODE_ERROR", "Failed to decode: ${e.message}", e.stackTraceToString())
-                        }
-                    }
-
-                     "encodeXml" -> {
-                        val xmlContent = call.argument<String>("xmlContent")
-                        if (xmlContent == null) {
-                            result.error("INVALID_ARGUMENT", "Missing 'xmlContent' argument", null)
-                            return@setMethodCallHandler
-                        }
-
-                        try {
-                            val encoder = aXMLEncoder()
-
-                            val encodedBytes: ByteArray = encoder.encodeString(this, xmlContent)
-
-                            result.success(encodedBytes)
-
-                        } catch (e: XmlPullParserException) {
-                            Log.e("AXMLDecoder", "XML Parsing Error during encode", e)
-                            result.error("ENCODE_ERROR", "Invalid XML format: ${e.message}", null)
-                        } catch (e: Exception) {
-                            Log.e("AXMLDecoder", "Generic Error during encode", e)
-                            result.error("ENCODE_ERROR", "An unexpected error occurred: ${e.message}", null)
-                        }
-                    }
-
-                    else -> {
-                        result.notImplemented()
-                    }
+                    "decodeBinaryAXML" -> handleDecodeAXML(call, result)
+                    "encodeXml" -> handleEncodeXML(call, result)
+                    "buildAndSignApk" -> handleBuildAndSignApk(call, result)
+                    "debugListAssets" -> handleDebugListAssets(call, result)
+                    else -> result.notImplemented()
                 }
             }
     }
+    
+    private fun handleDecodeAXML(call: io.flutter.plugin.common.MethodCall, result: MethodChannel.Result) {
+        val path = call.argument<String>("path")
+        if (path == null) {
+            result.error("INVALID_ARGUMENT", "Missing 'path' argument", null)
+            return
+        }
 
-    // Updated to take a File object for convenience
+        try {
+            val file = File(path)
+            val decodedXml = if (isBinaryXML(file)) {
+                FileInputStream(file).use { fis -> aXMLDecoder().decode(fis) }
+            } else {
+                file.readText(Charsets.UTF_8)
+            }
+            result.success(decodedXml)
+        } catch (e: Exception) {
+            result.error("DECODE_ERROR", "Failed to decode: ${e.message}", e.stackTraceToString())
+        }
+    }
+
+    private fun handleEncodeXML(call: io.flutter.plugin.common.MethodCall, result: MethodChannel.Result) {
+        val xmlContent = call.argument<String>("xmlContent")
+        if (xmlContent == null) {
+            result.error("INVALID_ARGUMENT", "Missing 'xmlContent' argument", null)
+            return
+        }
+
+        try {
+            val encoder = aXMLEncoder()
+            val encodedBytes: ByteArray = encoder.encodeString(this, xmlContent)
+            result.success(encodedBytes)
+        } catch (e: XmlPullParserException) {
+            Log.e("AXML_ENCODE", "XML Parsing Error", e)
+            result.error("ENCODE_ERROR", "Invalid XML format: ${e.message}", null)
+        } catch (e: Exception) {
+            Log.e("AXML_ENCODE", "Generic Error", e)
+            result.error("ENCODE_ERROR", "An unexpected error occurred: ${e.message}", null)
+        }
+    }
+    
+    private fun handleBuildAndSignApk(call: io.flutter.plugin.common.MethodCall, result: MethodChannel.Result) {
+        try {
+            copyAssetToFile("assets/signing/key.pk8", "app_key.pk8")
+            copyAssetToFile("assets/signing/cert.pem", "app_cert.pem")
+        } catch (e: IOException) {
+            result.error("ASSET_ERROR", "Failed to copy signing keys. Make sure 'assets/signing/key.pk8' and 'cert.pem' exist.", e.stackTraceToString())
+            return
+        }
+
+        val originalApkPath = call.argument<String>("originalApkPath")
+        val xmlFileName = call.argument<String>("xmlFileName")
+        val xmlBytes = call.argument<ByteArray>("xmlBytes")
+
+        if (originalApkPath == null || xmlFileName == null || xmlBytes == null) {
+            result.error("INVALID_ARGUMENT", "Missing arguments for buildAndSignApk", null)
+            return
+        }
+
+        val unsignedApk = File.createTempFile("unsigned_", ".apk", cacheDir)
+        val signedApk = File.createTempFile("signed_", ".apk", cacheDir)
+
+        try {
+            addFileToApk(
+                inputFile = File(originalApkPath),
+                outputFile = unsignedApk,
+                newFilePathInZip = "res/xml/$xmlFileName",
+                newFileBytes = xmlBytes
+            )
+
+            val appSigner = AppSigner(context)
+            appSigner.sign(unsignedApk, signedApk)
+            
+            val signedApkBytes = signedApk.readBytes()
+            result.success(signedApkBytes)
+
+        } catch (e: Exception) {
+            Log.e("BUILD_SIGN_ERROR", "Build/Sign failed", e)
+            result.error("SIGN_ERROR", "Failed to build or sign APK: ${e.message}", e.stackTraceToString())
+        } finally {
+            unsignedApk.delete()
+            signedApk.delete()
+        }
+    }
+
+    private fun handleDebugListAssets(call: io.flutter.plugin.common.MethodCall, result: MethodChannel.Result) {
+        val path = call.argument<String>("path") ?: ""
+        try {
+            val assetList = assets.list("flutter_assets/$path")
+            result.success(assetList?.toList())
+        } catch (e: IOException) {
+            result.error("DEBUG_FAIL", "Failed to list assets: ${e.message}", null)
+        }
+    }
+
     private fun isBinaryXML(file: File): Boolean {
         if (!file.exists() || !file.isFile) return false
-
-        // AXML magic number: 0x00080003
         val magic = byteArrayOf(0x03, 0x00, 0x08, 0x00)
-        
         return try {
             FileInputStream(file).use {
                 val buffer = ByteArray(4)
@@ -89,6 +140,37 @@ class MainActivity : FlutterActivity() {
             }
         } catch (e: IOException) {
             false
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun copyAssetToFile(assetName: String, outputFileName: String) {
+        val outFile = File(filesDir, outputFileName)
+        // Actually if we want to access the flutter assets natively or say bridge, its not direct so I created flutter_assets/(assets_path)
+        val realAssetPath = "flutter_assets/$assetName"
+        assets.open(realAssetPath).use { inputStream ->
+            FileOutputStream(outFile).use { outputStream ->
+                inputStream.copyTo(outputStream)
+            }
+        }
+    }
+
+    private fun addFileToApk(inputFile: File, outputFile: File, newFilePathInZip: String, newFileBytes: ByteArray) {
+        ZipInputStream(inputFile.inputStream().buffered()).use { zis ->
+            ZipOutputStream(outputFile.outputStream().buffered()).use { zos ->
+                var entry = zis.nextEntry
+                while (entry != null) {
+                    if (entry.name != newFilePathInZip) {
+                        zos.putNextEntry(ZipEntry(entry.name))
+                        zis.copyTo(zos)
+                        zos.closeEntry()
+                    }
+                    entry = zis.nextEntry
+                }
+                zos.putNextEntry(ZipEntry(newFilePathInZip))
+                zos.write(newFileBytes)
+                zos.closeEntry()
+            }
         }
     }
 }
