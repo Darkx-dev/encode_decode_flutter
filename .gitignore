@@ -1,0 +1,21 @@
+
+# FVM Version Cache
+.fvm/
+.vscode/
+.dart_tool/
+*/.gradle/*
+
+debug
+
+profile
+
+.idea/
+
+test
+
+web
+linux 
+macOS
+windows
+build
+ios
