@@ -1,9 +1,15 @@
 -keep class org.xmlpull.** { *; }
+-dontwarn org.xmlpull.**
 -keepnames class * implements org.xmlpull.v1.XmlPullParser
 -keepnames class * implements org.xmlpull.v1.XmlPullParserFactory
 -keep class org.xmlpull.v1.XmlPullParserFactory
 -keep class io.flutter.plugin.common.MethodChannel { *; }
 -keepclassmembers class io.flutter.plugin.common.MethodChannel$* { *; }
 -keep class kotlin.Metadata { *; }
--keep class com.example.my_android_plugin.** { *; }
+-dontwarn kotlin.**
+-keep class com.ineffable.hub.plus.** { *; }
 -keep class com.apk.axml.** { *; }
+-dontwarn com.apk.axml.**
+-keep class com.android.apksig.** { *; }
+-dontwarn com.android.apksig.**
+-keepattributes Signature,InnerClasses,EnclosingMethod

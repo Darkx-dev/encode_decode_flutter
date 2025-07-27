@@ -10,7 +10,7 @@ dependencies {
     implementation("com.github.apk-editor:axml:95566d73f2")
     implementation("com.github.sunilpaulmathew.sCommon:fileutils:0a9f4f410f")
     implementation("xmlpull:xmlpull:1.1.3.1")
-    implementation("com.android.tools.build:apksig:8.1.1")
+    implementation("com.android.tools.build:apksig:8.13.0-alpha02")
 }
 
 android {

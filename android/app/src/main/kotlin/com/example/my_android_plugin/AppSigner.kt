@@ -1,5 +1,6 @@
 package com.example.my_android_plugin
 
+import java.util.Base64
 import android.content.Context
 import android.os.Build
 import com.android.apksig.ApkSigner
@@ -23,21 +24,24 @@ class AppSigner(private val context: Context) {
         val (privateKey, certificate) = loadSigningKeys()
 
         val signerConfig = ApkSigner.SignerConfig.Builder("CERT", privateKey, listOf(certificate)).build()
+        
         val builder = ApkSigner.Builder(listOf(signerConfig))
             .setInputApk(inputFile)
             .setOutputApk(outputFile)
             .setCreatedBy("My Flutter XML Editor")
-            .setV1SigningEnabled(true)
-            .setV2SigningEnabled(true)
 
-        // V3 is supported from API 28 (Pie) onwards.
+        builder.setMinSdkVersion(-1)
+        builder.setV1SigningEnabled(true)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            builder.setV2SigningEnabled(true)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             builder.setV3SigningEnabled(true)
         }
-        // I don't like things getting complicated so PHACK V4 Signing
+        
         builder.setV4SigningEnabled(false)
 
-        // This will now only perform V1/V2/V3 signing and will not throw the error.
         builder.build().sign()
     }
 
@@ -51,20 +55,21 @@ class AppSigner(private val context: Context) {
         val privateKey = KeyFactory.getInstance("RSA").generatePrivate(keySpec)
 
         val pemFileContent = certificateFile.readText(Charsets.UTF_8)
-        val beginMarker = "-----BEGIN CERTIFICATE-----"
-        val endMarker = "-----END CERTIFICATE-----"
-        val beginIndex = pemFileContent.indexOf(beginMarker)
-        val endIndex = pemFileContent.indexOf(endMarker)
+        val base64Cert = pemFileContent
+            .replace("-----BEGIN CERTIFICATE-----", "")
+            .replace("-----END CERTIFICATE-----", "")
+            .replace("\\s".toRegex(), "")
 
-        if (beginIndex == -1 || endIndex == -1) {
-            throw CertificateException("Could not find certificate markers in cert.pem.")
+        if (base64Cert.isEmpty()) {
+            throw SecurityException("Could not find Base64 content in cert.pem.")
         }
 
-        val certificatePem = pemFileContent.substring(beginIndex, endIndex + endMarker.length)
-        val certificate = certificatePem.byteInputStream(Charsets.UTF_8).use {
+        val decodedCert = Base64.getDecoder().decode(base64Cert)
+        val certificate = decodedCert.inputStream().use {
             CertificateFactory.getInstance("X.509").generateCertificate(it) as X509Certificate
         }
-        
+
         return Pair(privateKey, certificate)
     }
+
 }
